@@ -34,6 +34,7 @@ def api_import(payload: dict | None = None, ctx: Ctx = Depends(get_ctx)) -> dict
         "totals": result["totals"],
         "reconciliation": result["reconciliation"],
         "all_balanced": result["all_balanced"],
+        "publish": result.get("publish"),
         "watermark": result["watermark"],
         "inputs": result["inputs"],
     }

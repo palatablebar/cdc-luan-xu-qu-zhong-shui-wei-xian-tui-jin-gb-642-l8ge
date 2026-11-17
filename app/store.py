@@ -85,7 +85,8 @@ class Store:
     @staticmethod
     def _ensure_columns(conn) -> None:
         """轻量迁移：老库缺列时补上，避免升级后 500。"""
-        wanted = {"inputs": {"declared": "TEXT"}}
+        wanted = {"inputs": {"declared": "TEXT", "declared_amount": "TEXT",
+                             "declared_tables": "TEXT"}}
         for table, columns in wanted.items():
             existing = {row["name"] for row in conn.execute(
                 f"PRAGMA table_info({table})").fetchall()}
@@ -136,6 +137,19 @@ class Store:
             "AND watermark_utc IS NOT NULL ORDER BY watermark_utc DESC LIMIT 1", ())
         return rows[0]["watermark_utc"] if rows else None
 
+    def latest_publishable(self) -> dict | None:
+        """当前发布版：最新一个对账结论为「可发布」的完成批次。
+
+        失败批次不写结果行、不可发布批次 publish_ok=0，都不会顶掉上一版，
+        正式日表始终从这里取（失败时保留上一版结果和证据）。
+        """
+        rows = self._all(
+            "SELECT b.* FROM batches b JOIN totals t "
+            "ON t.batch_id=b.batch_id AND t.key='publish_ok' "
+            "WHERE b.status='done' AND t.value='1' "
+            "ORDER BY b.created_at DESC, b.rowid DESC LIMIT 1", ())
+        return rows[0] if rows else None
+
     # ---------- 一次运行落库（单事务替换） ----------
     def save_run(self, *, batch: dict, inputs: list[dict], events: list[dict],
                  snapshots: list[dict], watermarks: list[dict], stages: list[dict],
@@ -146,12 +160,16 @@ class Store:
             for i, item in enumerate(inputs, 1):
                 conn.execute(
                     """INSERT INTO inputs (batch_id,seq,name,bytes,sha256,declared_rows,
-                        encoding,declared,kind,status,code,note,lines)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        encoding,declared,kind,status,code,note,lines,declared_amount,
+                        declared_tables)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (batch["batch_id"], i, item["name"], item["bytes"], item["sha256"],
                      item.get("declared_rows"), item.get("encoding"),
                      item.get("declared"), item.get("kind"), item["status"],
-                     item.get("code"), item.get("note", ""), item.get("lines", 0)))
+                     item.get("code"), item.get("note", ""), item.get("lines", 0),
+                     item.get("declared_amount"),
+                     json.dumps(item.get("declared_tables") or {},
+                                ensure_ascii=False)))
             for row in events:
                 conn.execute(
                     """INSERT INTO events (batch_id,row_ref,seq,table_name,pk,version,op,
@@ -258,12 +276,16 @@ class Store:
             for i, item in enumerate(inputs, 1):
                 conn.execute(
                     """INSERT INTO inputs (batch_id,seq,name,bytes,sha256,declared_rows,
-                        encoding,declared,kind,status,code,note,lines)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        encoding,declared,kind,status,code,note,lines,declared_amount,
+                        declared_tables)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (batch["batch_id"], i, item["name"], item["bytes"], item["sha256"],
                      item.get("declared_rows"), item.get("encoding"),
                      item.get("declared"), item.get("kind"), item["status"],
-                     item.get("code"), item.get("note", ""), item.get("lines", 0)))
+                     item.get("code"), item.get("note", ""), item.get("lines", 0),
+                     item.get("declared_amount"),
+                     json.dumps(item.get("declared_tables") or {},
+                                ensure_ascii=False)))
 
     # ---------- 读取 ----------
     def load_inputs(self, batch_id: str) -> list[dict]:

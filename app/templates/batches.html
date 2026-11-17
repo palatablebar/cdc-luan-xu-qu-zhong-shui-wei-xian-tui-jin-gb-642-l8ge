@@ -21,7 +21,7 @@
     <div class="table-wrap">
       <table class="grid" data-sortable>
         <thead>
-          <tr><th>批次</th><th>运行号</th><th>来源</th><th>水位</th><th class="num">已应用</th><th class="num">重复</th><th class="num">冲突</th><th class="num">隔离</th><th class="num">迟到</th><th class="num">快照键</th><th>对账</th><th>输入摘要</th></tr>
+          <tr><th>批次</th><th>运行号</th><th>来源</th><th>水位</th><th class="num">已应用</th><th class="num">重复</th><th class="num">冲突</th><th class="num">隔离</th><th class="num">迟到</th><th class="num">快照键</th><th>对账</th><th>发布</th><th>输入摘要</th></tr>
         </thead>
         <tbody>
           {% for row in batches %}
@@ -37,6 +37,7 @@
             <td class="num">{{ row.counters.late_events | num }}</td>
             <td class="num">{{ row.counters.snapshot_keys | num }}</td>
             <td><span class="balance {% if not row.reconcile_ok %}is-bad{% endif %}">{{ "平" if row.reconcile_ok else "不平" }}</span></td>
+            <td>{% if row.publish_code %}<span class="balance {% if not row.publish_ok %}is-bad{% endif %}">{{ "可发布" if row.publish_ok else "不可发布" }}</span>{% else %}—{% endif %}</td>
             <td class="mono">{{ row.input_digest | short }}</td>
           </tr>
           {% endfor %}
@@ -144,6 +145,7 @@
       <a class="btn" href="/api/export/snapshot.csv">快照</a>
       <a class="btn" href="/api/export/snapshot.json">快照 JSON</a>
       <a class="btn" href="/api/export/manifest.json">运行清单</a>
+      <a class="btn" href="/api/export/daily.json">正式日表</a>
     </div>
   </div>
 </section>

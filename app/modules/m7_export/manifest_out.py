@@ -30,6 +30,7 @@ def build(store, batch_id: str) -> dict:
         "stages": doc.get("stages", _stages(store, batch_id)),
         "counters": doc.get("counters", store.load_totals(batch_id)),
         "reconcile": doc.get("reconcile", []),
+        "publish": doc.get("publish"),
         "replayable": "同一 input_digest 重跑命中 batch_key，不新增行",
     }
 

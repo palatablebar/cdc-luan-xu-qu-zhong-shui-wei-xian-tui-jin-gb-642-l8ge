@@ -1,4 +1,4 @@
-# cdc-export v1 rows=5 charset=utf-8 导出=夜间补数
+# cdc-export v1 rows=5 amount=2741.00 tables=orders:4:2741.00;payments:1:0.00 charset=utf-8 导出=夜间补数
 table,pk,version,op,event_time,schema,ref_no,amt,st
 orders,1101,1,upsert,2026-11-15T08:10:30Z,v1,1101,"1,200.50",新建
 orders,1101,2,upsert,2026-11-15T08:12:30Z,v1,1101,"1,200.50",已支付

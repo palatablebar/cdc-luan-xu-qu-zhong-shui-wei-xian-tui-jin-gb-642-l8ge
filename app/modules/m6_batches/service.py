@@ -16,6 +16,7 @@ from ..m3_dedup import service as m3_service
 from ..m4_watermark import watermark as wm_mod
 from ..m5_snapshot import materialize, service as m5_service
 from ..m5_snapshot import apply as apply_mod
+from ..m8_recon import service as m8_service
 from . import history, resume, state
 
 
@@ -26,13 +27,14 @@ COUNT_KEYS = ("files", "raw_lines", "blank_lines", "header_repeat", "applied",
               "pending_only_keys", "pending_events", "drift_keys")
 AMOUNT_KEYS = ("amount_snapshot", "amount_pending", "amount_drift", "amount_applied")
 TIME_KEYS = ("watermark_utc", "max_event_time", "snapshot_as_of")
+FLAG_KEYS = ("reconcile_ok", "publish_ok")
 
 
 def public_totals(totals: dict) -> dict:
     """对外计数用整数、金额用两位字符串，保证首跑与重放同一个形状。"""
     out = {}
     for key, value in totals.items():
-        if key == "reconcile_json":
+        if key in ("reconcile_json", "publish_json"):
             continue
         if key in COUNT_KEYS:
             out[key] = int(value or 0)
@@ -40,6 +42,8 @@ def public_totals(totals: dict) -> dict:
             out[key] = f"{Decimal(str(value or '0.00')):.2f}"
         elif key in TIME_KEYS:
             out[key] = value
+        elif key in FLAG_KEYS:
+            out[key] = "1" if str(value or "0") == "1" else "0"
         else:
             out[key] = value
     return out
@@ -165,6 +169,14 @@ def run(*, settings, store, source: str = "all", params: dict | None = None,
         "reconcile_json": json.dumps(_jsonable(reconcile), ensure_ascii=False),
     }
 
+    # ---- M8 对账发布：源端声明锚点 → 差额桥 → 发布结论（随批次落库一份） ----
+    input_rows = [_input_row(f) for f in bundle.files]
+    event_rows = [n.to_row() for n in classified.all_rows]
+    publish = m8_service.build_conclusion(inputs=input_rows, events=event_rows,
+                                          totals=totals)
+    totals["publish_ok"] = 1 if publish["publishable"] else 0
+    totals["publish_json"] = json.dumps(publish, ensure_ascii=False)
+
     finished_at = _now_iso()
     elapsed = _ms(clock)
     stages.append(_stage("export", in_count=len(snapshot.rows),
@@ -181,21 +193,22 @@ def run(*, settings, store, source: str = "all", params: dict | None = None,
     doc = manifest_mod.build(
         run_id=run_id, batch_id=batch_id, batch_key=key, settings=settings,
         source=bundle.source, input_digest=bundle.input_digest,
-        inputs=[_input_row(f) for f in bundle.files], params=params,
+        inputs=input_rows, params=params,
         started_at=started_at, finished_at=finished_at, elapsed_ms=elapsed,
         stages=[{"stage": s["stage"], "in": s["in_count"], "out": s["out_count"],
                  "quarantine": s["quarantine_count"], "status": s["status"]}
                 for s in stages],
-        counters={k: str(v) for k, v in totals.items() if k != "reconcile_json"},
+        counters={k: str(v) for k, v in totals.items()
+                  if k not in ("reconcile_json", "publish_json")},
         watermark=_iso(marks.final) or "", max_event_time=max_event or "",
-        reconcile=_jsonable(reconcile))
+        reconcile=_jsonable(reconcile), publish=publish)
 
     snapshot_rows = [{**row, "amount": None if row["amount"] is None else str(row["amount"])}
                      for row in snapshot.rows]
     store.save_run(
         batch=batch,
-        inputs=[_input_row(f) for f in bundle.files],
-        events=[n.to_row() for n in classified.all_rows],
+        inputs=input_rows,
+        events=event_rows,
         snapshots=snapshot_rows,
         watermarks=wm_mod.series_rows(marks, iso),
         stages=stages, totals=totals, manifest=doc)
@@ -213,6 +226,7 @@ def run(*, settings, store, source: str = "all", params: dict | None = None,
         "counters": classified.counters,
         "reconciliation": _jsonable(reconcile),
         "all_balanced": all(r["ok"] for r in reconcile),
+        "publish": publish,
         "watermark": {
             "final": _iso(marks.final), "max_event_time": max_event,
             "late": marks.late, "on_time": marks.on_time,
@@ -248,6 +262,7 @@ def _replay_payload(store, replay: dict, key: str, run_id: str,
         },
         "reconciliation": reconcile,
         "all_balanced": totals.get("reconcile_ok") == "1",
+        "publish": m8_service.conclusion_for(store, replay["batch_id"]),
         "watermark": {"final": batch.get("watermark_utc"),
                       "max_event_time": batch.get("max_event_time"),
                       "late": int(totals.get("late_events", 0) or 0),
@@ -273,7 +288,13 @@ def _input_row(item) -> dict:
             "lines": item.lines, "encoding": item.encoding,
             "declared": item.declared, "kind": item.kind,
             "declared_rows": item.declared_rows, "status": item.status,
-            "code": item.code, "note": item.note}
+            "code": item.code, "note": item.note,
+            "declared_amount": (None if item.declared_amount is None
+                                else str(item.declared_amount)),
+            "declared_tables": {k: {"rows": v.get("rows"),
+                                    "amount": (None if v.get("amount") is None
+                                               else str(v["amount"]))}
+                                for k, v in item.declared_tables.items()}}
 
 
 def _batch_note(resume_of: str | None, late: int) -> str:

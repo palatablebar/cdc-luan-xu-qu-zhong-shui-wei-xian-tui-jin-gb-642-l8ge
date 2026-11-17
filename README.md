@@ -16,7 +16,9 @@
 - 水位线 = 已应用事件最大 `event_time` − 10 分钟，严格小于才记迟到，迟到**仍然应用**；
 - 快照按 `event_time ≤ as_of` 物化，`as_of` 之后的事件留待定窗口，一并给出合计；
 - 批次键 = 输入摘要 + 规则版本 + 参数，同一输入重跑命中批次、不新增行；
-- 导出事件证据、隔离区、冲突表、快照 CSV/JSON 与运行清单（含 `run_id` 与每个输入的 sha256）。
+- 对账以源端声明（文件头 `rows=`/`amount=`/分表 `tables=`）为锚点，差额桥逐项归因，
+  残差为 0 才可发布正式日表；新批次失败或不可发布时，上一版结果与证据原样保留；
+- 导出事件证据、隔离区、冲突表、快照 CSV/JSON、正式日表与运行清单（含 `run_id` 与每个输入的 sha256）。
 
 ## 功能模块
 
@@ -29,6 +31,7 @@
 | M5 快照物化 | 按水位物化快照，看待定键 | `POST /api/snapshot`、页面 `/snapshot` | `apply.py` `materialize.py` |
 | M6 批次续跑 | 查历史、看清单、续跑与重跑 | `GET /api/batches`、页面 `/batches` | `state.py` `resume.py` `history.py` |
 | M7 审计导出 | 下载证据行、隔离、冲突、快照与清单 | `GET /api/export/*` | `csv_out.py` `json_out.py` `manifest_out.py` |
+| M8 对账发布 | 看差额桥与发布门槛，下载正式日表 | `GET /api/recon`、`GET /api/export/daily.json`、页面 `/recon` | `bridge.py` `conclusion.py` `service.py` |
 
 模块内统一是 `handler.py`（入口）+ `service.py`（编排）+ 两个纯规则/读写文件；
 定义写在 `docs/DATA-DICTIONARY.md`，坑与测试映射写在 `docs/DEPTH.md`。
@@ -39,7 +42,10 @@
 2. **冲突不猜**：同键同版本两种内容 → 整组不应用；删除后到达的低版本 upsert 不复活；
 3. **水位单调**：`max(event_time) − 10min`，只由已应用事件推进，迟到只标记不丢弃；
 4. **快照半开**：`[-, as_of]` 进快照、`(as_of, +inf)` 待定，两窗口不重叠；
-5. **金额 Decimal**：`0.01` 量化、`ROUND_HALF_UP`，合计可独立复算。
+5. **金额 Decimal**：`0.01` 量化、`ROUND_HALF_UP`，合计可独立复算；
+6. **发布裁决**：对账基准是源端声明总数（外部锚点），仓端折叠结果是实绩；差额桥
+   逐项归因（传输缺失 / 重复 / 冲突 / 隔离 / 折叠 / 待定），残差为 0 才可发布；
+   无法解释的少行不能发布，重跑同一批复用同一份结论，失败保留上一版结果和证据。
 
 ## 启动
 
@@ -58,7 +64,8 @@ docker compose down -v             # 连数据库卷一起删
 2. `/events` 按分类筛选，看每行的行号引用与原因码；
 3. `/conflicts` 看冲突分组、隔离区与优先级表，导出隔离 CSV；
 4. `/snapshot` 点「物化」，看活跃 / 墓碑 / 待定与三条对账；
-5. `/batches` 看 `run_id`、输入 sha256、阶段耗时，导出运行清单。
+5. `/recon` 看发布结论与差额桥：源端声明 → 实收 → 已应用 → 快照，逐步归因；
+6. `/batches` 看 `run_id`、输入 sha256、阶段耗时，导出运行清单与正式日表。
 
 ## API 与页面
 
@@ -74,22 +81,24 @@ docker compose down -v             # 连数据库卷一起删
 | GET | `/api/snapshot` / POST `/api/snapshot` | 读快照 / 重新物化 |
 | GET | `/api/batches`、`/api/batches/{id}`、`/api/batches/{id}/manifest` | 批次与清单 |
 | POST | `/api/batches/{id}/resume` | 续跑 |
+| GET | `/api/recon` | 发布结论（差额桥 + 门槛 + 当前发布版） |
 | GET | `/api/export/{events,quarantine,conflicts,snapshot}.csv` | 证据导出 |
 | GET | `/api/export/{snapshot,manifest}.json` | 快照与运行清单 |
+| GET | `/api/export/daily.json` | 正式日表（只发当前发布版） |
 
-页面共 6 个：`/`、`/events`、`/schema`、`/conflicts`、`/snapshot`、`/batches`。
+页面共 7 个：`/`、`/events`、`/schema`、`/conflicts`、`/snapshot`、`/recon`、`/batches`。
 
 ## 目录
 
 ```text
 app/
   main.py config.py errors.py reasons.py manifest.py store.py web.py bootstrap.py
-  modules/m1_events/ … m7_export/        # 每模块 handler + service + 2 个规则文件
-  templates/                             # base + 6 页
+  modules/m1_events/ … m8_recon/        # 每模块 handler + service + 2 个规则文件
+  templates/                             # base + 7 页
   static/                                # theme / layout / components + 3 个 js
 docs/  DEPTH.md  DATA-DICTIONARY.md  RUNBOOK.md
 sample_data/  events_main.jsonl  events_v1_gb.csv  events_late.jsonl  events_clean.jsonl  schema_contract.json
-tests/  test_m1_events.py … test_m7_export.py  test_e2e.py  test_invariants.py  fixtures/
+tests/  test_m1_events.py … test_m8_recon.py  test_e2e.py  test_invariants.py  fixtures/
 ```
 
 ## 已知不覆盖

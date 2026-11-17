@@ -19,7 +19,8 @@ docker compose exec -T app python -m pytest -q
 2. `/events` 按分类筛选，确认每行的行号引用与原因码；
 3. `/conflicts` 看冲突分组与隔离区，导出隔离 CSV；
 4. `/snapshot` 点「物化」，核对三条对账；
-5. `/batches` 看 `run_id`、输入 sha256 与阶段耗时，导出运行清单。
+5. `/recon` 看发布结论与差额桥，确认四个门槛全过后下载正式日表；
+6. `/batches` 看 `run_id`、输入 sha256 与阶段耗时，导出运行清单。
 
 ## 3 主流程（命令）
 
@@ -34,9 +35,13 @@ curl -s -o /tmp/quarantine.csv  "$BASE/api/export/quarantine.csv"
 curl -s -o /tmp/conflicts.csv   "$BASE/api/export/conflicts.csv"
 curl -s -o /tmp/snapshot.csv    "$BASE/api/export/snapshot.csv"
 curl -s -o /tmp/manifest.json   "$BASE/api/export/manifest.json"
+curl -s "$BASE/api/recon"       | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["publish"]["verdict"])'
+curl -s -o /tmp/daily.json      "$BASE/api/export/daily.json"
 ```
 
 判定看数字：行账 42 = 27 + 2 + 3 + 10；键账 19 = 18 + 1；金额 1552.51 + 200.00 + 0.00 = 1752.51。
+锚点账：声明 43 行 / 6330.01 元 → 实收 42 行 / 5814.01 元 → 快照 18 键 / 1552.51 元，
+残差 0 才可发布（裁决见 DATA-DICTIONARY.md 第 10 节）。
 
 ## 4 失败处置
 
@@ -48,6 +53,12 @@ curl -s -o /tmp/manifest.json   "$BASE/api/export/manifest.json"
 | 导入报 409 | `C_STALE_BATCH` | 拿到的是旧导出，重新导出后再跑 |
 | 快照键比预期少 | `W_PENDING_WINDOW` | 事件落在水位之后，等下一轮水位推过 |
 | 水位不前进 | `W_WATERMARK_REGRESS` | 检查导出端时钟与文件版本 |
+| 日表 409 / 不可发布 | `R_ANCHOR_MISSING` | 文件头缺 `rows=`/`amount=` 声明，导出端补声明头后重跑 |
+| 日表 409 / 不可发布 | `R_UNEXPLAINED_GAP` | 声明与实收的行差无法归因，核对截断标记与声明行数 |
+| 日表 409 / 不可发布 | `R_UNEXPLAINED_AMOUNT` | 声明金额差无可归因行，核对金额不可解析的隔离行 |
+
+不可发布时正式日表仍发上一版（`daily.json` 的 `superseded` 字段给出被挡下的批次），
+上一版的快照、清单与证据不动；修好后重跑同一输入命中批次键，不重复计数。
 
 ## 5 重建数据库
 
@@ -72,4 +83,5 @@ python -m pytest -q
 - `quarantine.csv`：10 行，含 `字段`、`原值`、`原始文本`；
 - `conflicts.csv`：3 行，含两条证据行引用；
 - `snapshot.csv` / `snapshot.json`：18 键，活跃 16、墓碑 2；
-- `manifest.json`：`run_id`、每个输入的 sha256、阶段耗时、四账。
+- `manifest.json`：`run_id`、每个输入的 sha256、阶段耗时、四账与发布结论；
+- `daily.json`：正式日表——当前发布版的结论、差额桥与证据指针。

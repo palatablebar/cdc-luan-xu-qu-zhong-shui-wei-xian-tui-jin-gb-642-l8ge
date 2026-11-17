@@ -1,4 +1,4 @@
-# cdc-export v2 rows=34 charset=utf-8 generated=2026-11-15T17:06:00+08:00
+# cdc-export v2 rows=34 amount=3523.00 tables=orders:22:3400.00;customers:3:42.00;payments:2:36.00;shipmentz:1:0.00;shipments:2:0.00;inventory:2:0.00;products:1:45.00;refunds:1:0.00 charset=utf-8 generated=2026-11-15T17:06:00+08:00
 {"table":"orders","pk":"1001","version":1,"op":"upsert","event_time":"2026-11-15T08:00:00Z","schema":"v2","payload":{"status":"新建","amount":"120.50"}}
 {"table":"orders","pk":"1002","version":1,"op":"upsert","event_time":"2026-11-15T08:02:00Z","schema":"v1","payload":{"ref_no":"1002","amt":"88.00","st":"新建"}}
 {"table":"orders","pk":"1003","version":1,"op":"upsert","event_time":"2026-11-15T08:03:00Z","schema":"v2","payload":{"status":"新建","amount":"45.00"}}

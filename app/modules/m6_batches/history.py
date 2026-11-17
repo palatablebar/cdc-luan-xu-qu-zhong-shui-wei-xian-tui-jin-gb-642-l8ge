@@ -11,6 +11,7 @@ def rows(store, limit: int = 30) -> list[dict]:
     for batch in store.list_batches(limit=limit):
         totals = store.load_totals(batch["batch_id"])
         inputs = store.load_inputs(batch["batch_id"])
+        publish = json.loads(totals.get("publish_json") or "{}")
         out.append({
             "batch_id": batch["batch_id"],
             "run_id": batch["run_id"],
@@ -34,6 +35,8 @@ def rows(store, limit: int = 30) -> list[dict]:
                 "snapshot_keys": _int(totals.get("snapshot_keys")),
             },
             "reconcile_ok": totals.get("reconcile_ok") == "1",
+            "publish_ok": totals.get("publish_ok") == "1",
+            "publish_code": publish.get("code"),
             "params": json.loads(batch.get("params_json") or "{}"),
         })
     return out
@@ -63,8 +66,9 @@ def detail(store, batch_id: str) -> dict:
         "watermark_utc": batch.get("watermark_utc"),
         "max_event_time": batch.get("max_event_time"),
         "counters": {k: v for k, v in totals.items()
-                     if not k.startswith("reconcile")},
+                     if not k.startswith("reconcile") and k != "publish_json"},
         "reconcile": reconcile,
+        "publish": json.loads(totals.get("publish_json") or "null"),
         "inputs": store.load_inputs(batch_id),
         "stages": store.load_stages(batch_id),
     }

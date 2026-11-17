@@ -44,12 +44,20 @@ class FileRead:
     lines: int = 0
     blank: int = 0
     note: str = ""
+    declared_amount: object = None
+    declared_tables: dict = field(default_factory=dict)
 
     def as_input_row(self) -> dict:
         return {"name": self.name, "bytes": self.size, "sha256": self.sha256,
                 "declared_rows": self.declared_rows, "encoding": self.encoding,
                 "kind": self.kind, "status": self.status, "code": self.code,
-                "note": self.note, "lines": self.lines}
+                "note": self.note, "lines": self.lines,
+                "declared_amount": (None if self.declared_amount is None
+                                    else str(self.declared_amount)),
+                "declared_tables": {k: {"rows": v.get("rows"),
+                                        "amount": (None if v.get("amount") is None
+                                                   else str(v["amount"]))}
+                                    for k, v in self.declared_tables.items()}}
 
 
 def _first_error(codes: list[str]) -> str | None:
@@ -71,7 +79,9 @@ def read_bytes(name: str, raw: bytes) -> FileRead:
         return FileRead(name=name, size=len(raw), sha256=digest, kind="unknown",
                         encoding="", declared=meta.declared_charset,
                         declared_rows=meta.declared_rows, status="failed",
-                        code="E_DECODE_FAILED", codes=codes, note="全部编码解码失败")
+                        code="E_DECODE_FAILED", codes=codes, note="全部编码解码失败",
+                        declared_amount=meta.declared_amount,
+                        declared_tables=meta.declared_tables)
 
     sniffed = fmt.sniff(decoded.text)
     codes.extend(sniffed.header_codes)
@@ -98,6 +108,7 @@ def read_bytes(name: str, raw: bytes) -> FileRead:
         status="ok", code=_first_error(codes), codes=_dedup(codes), rows=rows,
         header=sniffed.header, lines=len(rows), blank=_blank_lines(decoded.text),
         note=_note_for(codes, declared, len(rows), len(data_rows)),
+        declared_amount=meta.declared_amount, declared_tables=meta.declared_tables,
     )
 
 

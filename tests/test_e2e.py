@@ -35,6 +35,7 @@ def test_all_pages_return_200(client):
         "/schema": "契约",
         "/conflicts": "冲突与隔离",
         "/snapshot": "快照",
+        "/recon": "发布结论",
         "/batches": "批次",
     }
     for path, marker in pages.items():
@@ -92,13 +93,16 @@ def test_failures_and_idempotent_import(client):
 
 
 def test_empty_state_pages_render(settings):
-    """空态：库里还没有批次时 6 个页面都要 200，不能 500。"""
+    """空态：库里还没有批次时 7 个页面都要 200，不能 500。"""
     app = create_app(settings, seed=False)
     with TestClient(app) as client:
-        for path in ("/", "/events", "/schema", "/conflicts", "/snapshot", "/batches"):
+        for path in ("/", "/events", "/schema", "/conflicts", "/snapshot",
+                     "/recon", "/batches"):
             response = client.get(path)
             assert response.status_code == 200, path
         assert client.get("/api/health").json()["batch_id"] is None
         snapshot = client.get("/snapshot")
         assert "还没有快照。" in snapshot.text
         assert "0.00" in snapshot.text
+        recon = client.get("/api/recon").json()
+        assert recon["publish"]["publishable"] is False

@@ -1,7 +1,9 @@
 """格式层：识别 JSONL / CSV、解析导出头、重复表头与列数。
 
-导出头的写法是 `# key=value key=value`（单行），包含 rows（声明条数）与 charset
-（声明编码）。声明条数用于 TRAP-16 的完整性校验：实际数据行数与声明不符即判截断。
+导出头的写法是 `# key=value key=value`（单行），包含 rows（声明条数）、charset
+（声明编码）、amount（声明金额总数）与 tables（分表声明 `表:行数:金额;…`）。
+声明条数用于 TRAP-16 的完整性校验：实际数据行数与声明不符即判截断；
+声明行数/金额是 M8 对账发布的外部锚点（见 docs/DATA-DICTIONARY.md 第 10 节）。
 """
 from __future__ import annotations
 
@@ -9,6 +11,7 @@ import csv
 import io
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 
 HEADER_META_RE = re.compile(r"([a-zA-Z_]+)=([^\s]+)")
 
@@ -17,6 +20,8 @@ HEADER_META_RE = re.compile(r"([a-zA-Z_]+)=([^\s]+)")
 class Meta:
     declared_rows: int | None = None
     declared_charset: str | None = None
+    declared_amount: Decimal | None = None
+    declared_tables: dict = field(default_factory=dict)
     raw: str = ""
 
 
@@ -29,13 +34,44 @@ class Sniffed:
     header_codes: list[str] = field(default_factory=list)
 
 
+def parse_amount(text: str | None) -> Decimal | None:
+    """声明金额：非法写法按缺失处理（锚点不齐，M8 会判不可发布）。"""
+    if not text:
+        return None
+    try:
+        return Decimal(text).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def parse_tables(text: str | None) -> dict:
+    """分表声明：`orders:30:1600.01;customers:4:143.50`，金额段可省（`orders:30`）。"""
+    tables: dict = {}
+    if not text:
+        return tables
+    for part in text.split(";"):
+        piece = part.strip()
+        if not piece or ":" not in piece:
+            continue
+        segments = piece.split(":")
+        name = segments[0].strip()
+        if not name:
+            continue
+        rows = int(segments[1]) if len(segments) > 1 and segments[1].isdigit() else None
+        amount = parse_amount(segments[2]) if len(segments) > 2 else None
+        tables[name] = {"rows": rows, "amount": amount}
+    return tables
+
+
 def parse_meta(line: str) -> Meta:
     body = line.lstrip("#").strip()
     pairs = dict(HEADER_META_RE.findall(body))
     rows: int | None = None
     if pairs.get("rows", "").isdigit():
         rows = int(pairs["rows"])
-    return Meta(declared_rows=rows, declared_charset=pairs.get("charset"), raw=body)
+    return Meta(declared_rows=rows, declared_charset=pairs.get("charset"),
+                declared_amount=parse_amount(pairs.get("amount")),
+                declared_tables=parse_tables(pairs.get("tables")), raw=body)
 
 
 def split_comments(text: str) -> tuple[str, Meta, int]:

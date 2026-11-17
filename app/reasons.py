@@ -139,6 +139,22 @@ REASONS = {
     "X_EMPTY_SELECTION": _r(
         "X_EMPTY_SELECTION", WARN, "export",
         "导出选择为空", "先跑一次采信再导出"),
+    # ---- M8 对账发布 ----
+    "R_PUBLISHABLE": _r(
+        "R_PUBLISHABLE", INFO, "reconcile",
+        "差额全部归因、残差为 0，可发布正式日表", "归档运行清单与日表"),
+    "R_ANCHOR_MISSING": _r(
+        "R_ANCHOR_MISSING", ERROR, "reconcile",
+        "文件头缺少源端声明（rows/amount），对账没有锚点", "导出端补声明头后重跑"),
+    "R_UNEXPLAINED_GAP": _r(
+        "R_UNEXPLAINED_GAP", ERROR, "reconcile",
+        "声明与实收之间存在无法归因的行差，禁止发布", "核对声明行数、实收行数与截断标记"),
+    "R_UNEXPLAINED_AMOUNT": _r(
+        "R_UNEXPLAINED_AMOUNT", ERROR, "reconcile",
+        "声明金额与实收金额的差额没有可归因行", "核对金额不可解析的隔离行"),
+    "R_INTERNAL_UNBALANCED": _r(
+        "R_INTERNAL_UNBALANCED", ERROR, "reconcile",
+        "仓内四账不守恒，先修内部账再谈发布", "查看对账面板哪一条不平"),
 }
 
 

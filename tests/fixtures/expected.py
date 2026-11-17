@@ -73,6 +73,21 @@ MAIN_FILE = "events_main.jsonl"
 MAIN_DECLARED_ROWS = 34
 MAIN_ACTUAL_ROWS = 33
 
+# ---- 源端声明锚点（文件头 rows=/amount=/tables=）----
+DECLARED_ROWS = 43                       # 34 + 5 + 4
+DECLARED_AMOUNT = "6330.01"              # 3523.00 + 2741.00 + 66.01
+RECEIVED_AMOUNT = "5814.01"              # 全部实收行可解析金额合计
+CARRIED_AMOUNT = "516.00"                # 不可读/缺失行承载：45+33+88+50+300
+MISSING_ROWS = 1                         # 主文件声明 34 实收 33
+APPLIED_EVENTS_AMOUNT = "3622.01"        # 已应用事件金额（含被覆盖旧版本）
+FOLDING_AMOUNT = "1869.50"               # 版本折叠/作废掉的金额
+DUPLICATE_AMOUNT = "115.00"
+CONFLICT_AMOUNT = "1999.00"
+QUARANTINE_AMOUNT = "78.00"
+ORDERS_DECLARED_ROWS = 29                # 22 + 4 + 3（分表声明）
+CARRIER_REFS = ("events_main.jsonl:23", "events_main.jsonl:31",
+                "events_main.jsonl:35", "events_v1_gb.csv:6")
+
 # ---- 干净样例（同一条代码路径，无脏行）----
 CLEAN_SOURCE = "events_clean.jsonl"
 CLEAN_APPLIED = 3

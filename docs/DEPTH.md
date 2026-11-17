@@ -1,6 +1,6 @@
 # 深度登记 cdcwater（CDC 乱序去重与水位线推进）
 
-- 规模：中型（7 个功能模块 / 7 个页面 / 79 条测试）
+- 规模：中型（8 个功能模块 / 7 个页面 / 93 条测试）
 - 核心规则一：**版本序折叠 + 墓碑**——每个 `(table, pk)` 按 `version` 升序应用，`delete` 写墓碑；
   同键同版本出现两种内容整组不应用（`C_VERSION_CONFLICT`），删除之后到达的低版本 upsert
   不复活（`C_TOMBSTONE_RESURRECT`），删除之前到达的低版本照常应用后被覆盖。
@@ -22,6 +22,7 @@
 | M5 快照物化 | 按水位物化快照，看待定键与三条对账 | POST /api/snapshot、页面 /snapshot | `app/modules/m5_snapshot/apply.py` `app/modules/m5_snapshot/materialize.py` `app/modules/m5_snapshot/service.py` | `tests/test_m5_snapshot.py` |
 | M6 批次续跑 | 查历史、看运行清单、续跑与重跑 | GET /api/batches、POST /api/batches/{id}/resume、页面 /batches | `app/modules/m6_batches/state.py` `app/modules/m6_batches/resume.py` `app/modules/m6_batches/history.py` `app/modules/m6_batches/service.py` | `tests/test_m6_batches.py` |
 | M7 审计导出 | 下载证据行、隔离、冲突、快照与清单 | GET /api/export/* | `app/modules/m7_export/csv_out.py` `app/modules/m7_export/json_out.py` `app/modules/m7_export/manifest_out.py` `app/modules/m7_export/service.py` | `tests/test_m7_export.py` |
+| M8 对账发布 | 看差额桥与发布门槛，下载正式日表 | GET /api/recon、GET /api/export/daily.json、页面 /recon | `app/modules/m8_recon/bridge.py` `app/modules/m8_recon/conclusion.py` `app/modules/m8_recon/service.py` | `tests/test_m8_recon.py` |
 
 端到端：`tests/test_e2e.py` 覆盖「样例 → 采信 → 归一 → 去重冲突 → 水位 → 快照 → 导出 → 页面」，
 含 4xx 失败输入与幂等重跑；`tests/test_invariants.py` 覆盖行账、键账、金额、幂等、迟到互补。
@@ -41,6 +42,7 @@
 | TRAP-19 | 一条事件同时像「重复」又像「冲突」，坏行还互相重复 | 按代码书写顺序覆盖，结果随遍历顺序变 | 优先级 `quarantine > conflict > duplicate > apply`，各桶由集合运算得出 | `app/modules/m3_dedup/service.py` | `tests/test_m3_dedup.py::test_conflict_beats_duplicate`、`tests/test_m3_dedup.py::test_priority_independent_of_input_order` |
 | TRAP-23 | 事件 `event_time` 恰好等于水位线 / 恰好等于 `as_of` | 两端都算，重复计入或漏计 | 迟到用半开 `[水位线, +inf)`；快照含 `as_of`、待定窗口 `(as_of, +inf)` 半开 | `app/modules/m4_watermark/watermark.py`、`app/modules/m5_snapshot/materialize.py` | `tests/test_m4_watermark.py::test_boundary_equal_watermark_is_not_late`、`tests/test_m5_snapshot.py::test_boundary_event_at_as_of_included_once` |
 | TRAP-26 | 拿上一轮旧导出再跑一次（最大事件 06:00 < 已持久化水位 08:52） | 无条件覆盖，水位回退、快照变旧 | 陈旧批次直接 409 `C_STALE_BATCH`，已落库结果不动 | `app/modules/m6_batches/resume.py`、`app/modules/m6_batches/state.py` | `tests/test_m6_batches.py::test_stale_input_rejected` |
+| TRAP-27 | 源端声明 34 行实收 33 行、声明金额含截断行 | 拿源总数直接对平仓端天天失败；只看仓端自证又掩盖漏行 | 声明作外部锚点 + 差额桥逐项归因，残差 ≠ 0 判 `R_UNEXPLAINED_GAP` 不发布 | `app/modules/m8_recon/bridge.py`、`app/modules/m8_recon/conclusion.py` | `tests/test_m8_recon.py::test_over_delivery_is_blocked`、`tests/test_m8_recon.py::test_truncation_gap_is_publishable_with_disclosure` |
 
 ## 对账规则
 
@@ -49,9 +51,14 @@
 - **金额账**：快照金额 + 待定金额 + 变化金额 = 已应用金额（Decimal，单位元，2 位）；
 - **迟到账**：迟到 + 准时 = 已应用（迟到只打标记，不改变应用结果）；
 - 四条账在首页、`/snapshot` 与 `manifest.json` 的 `reconcile` 中同时出现，任一条不平会显式为「不平」。
+- **锚点账（M8）**：源端声明（文件头 `rows=`/`amount=`/`tables=`）是外部锚点，
+  仓端折叠结果是实绩；差额桥 = 声明 − 传输缺失 − 重复 − 冲突 − 隔离 − 版本折叠 − 待定，
+  残差为 0 才可发布。裁决全文见 DATA-DICTIONARY.md 第 10 节。
 
 样例数据的四账：行 42 = 27 + 2 + 3 + 10；键 19 = 18 + 1；快照 18 = 16 活跃 + 2 墓碑；
 金额 1552.51 + 200.00 + 0.00 = 1752.51。
+样例数据的锚点账：声明 43 行 / 6330.01 元 − 传输缺失 1 行 − 不可读行承载 516.00
+= 实收 42 行 / 5814.01 元 → 已应用 27 行 / 3622.01 元 → 折叠后 19 键 / 1752.51 元。
 
 ## 反例与不变量
 
@@ -68,7 +75,11 @@
   - `tests/test_invariants.py::test_amount_conservation_is_exact`（金额守恒，Decimal 精确）；
   - `tests/test_invariants.py::test_idempotent_rerun_keeps_rows_and_totals`（幂等重跑）；
   - `tests/test_m4_watermark.py::test_watermark_monotonic`（水位单调）；
-  - `tests/test_m5_snapshot.py::test_rebuild_is_idempotent`（物化可重复）。
+  - `tests/test_m5_snapshot.py::test_rebuild_is_idempotent`（物化可重复）；
+  - `tests/test_m8_recon.py::test_row_bridge_telescopes_to_snapshot`（行桥从声明套到快照）；
+  - `tests/test_m8_recon.py::test_amount_bridge_telescopes_to_folded`（金额桥套到折叠金额）；
+  - `tests/test_m8_recon.py::test_replay_returns_identical_conclusion`（重放复用同一份结论）；
+  - `tests/test_m8_recon.py::test_blocked_batch_keeps_previous_publish`（失败保留上一版）。
 
 ## 已知不覆盖
 

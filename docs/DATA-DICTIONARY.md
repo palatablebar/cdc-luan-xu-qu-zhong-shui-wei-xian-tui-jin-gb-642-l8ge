@@ -87,7 +87,45 @@
 
 `run_id`（`CDC-时间戳-随机`）、`batch_id`（`B-批次键`）、`batch_key`（输入摘要 + 规则版本 +
 参数 的 sha256 前 10 位）、`input_digest`（每个文件 `name:sha256` 的摘要）、`inputs[]`
-（`name/bytes/sha256/lines/encoding/kind/declared_rows/status/code`）、`params`、
-`watermark_utc`、`max_event_time_utc`、`stages[]`、`counters`、`reconcile`。
+（`name/bytes/sha256/lines/encoding/kind/declared_rows/declared_amount/declared_tables/status/code`）、`params`、
+`watermark_utc`、`max_event_time_utc`、`stages[]`、`counters`、`reconcile`、`publish`（第 10 节）。
 
 同一 `input_digest` 重跑命中同一 `batch_key`，返回原批次、不新增行。
+
+## 10 对账基准与发布裁决
+
+**裁决：对账基准是源端声明总数，仓端按键折叠的结果是实绩；两者之间的差额必须经
+「差额桥」逐项归因，残差为 0 才可发布正式日表。**
+
+- 源端声明 = 每个文件头的 `rows=`（声明行数）、`amount=`（声明金额）、`tables=`
+  （分表声明 `表:行数:金额;…`，金额段可省）。重复投递、冲突、作废（隔离/墓碑/被覆盖的
+  旧版本）都算进源端总数，所以**不能直接拿源端总数对平仓端**；
+- 仓端内部四账（第 8 节）只是自证：它证明「收到的行都去了该去的地方」，证明不了
+  「源端发出的行都到了」，所以**只看仓端自证不作为发布依据**；
+- 差额桥把两边连起来，每一步都是具名原因：
+
+| 行桥 | 金额桥 |
+|---|---|
+| 源端声明行 | 源端声明金额 |
+| − 传输缺失（声明多于实收，文件级 `E_TAIL_TRUNCATED`） | − 不可读/缺失行承载（`E_BAD_JSON`/`E_TAIL_TRUNCATED`/`E_COLUMN_COUNT`/`E_TYPE_MISMATCH` 及未到达行） |
+| = 实收数据行 | = 实收金额 |
+| − 重复 − 冲突 − 隔离 | − 重复 − 冲突 − 隔离（可解析部分） |
+| = 已应用事件 | = 已应用事件金额 |
+| − 版本折叠（同键多版本 → 一键） | − 版本折叠/作废（旧版本被覆盖、墓碑作废） |
+| = 键 − 待定窗口 = 快照键（活跃 + 墓碑） | = 折叠金额（= 快照 + 待定 + 变化） |
+
+**发布门槛**（任一不过即不可发布，结论与差额照样落库供复核）：
+
+1. 锚点齐全：每个输入文件都带声明行数与金额（无锚不定发，`R_ANCHOR_MISSING`）；
+2. 仓内四账守恒（`R_INTERNAL_UNBALANCED`）；
+3. 行残差为 0：声明 − 传输缺失 − 实收 = 0（多发少发都不行，`R_UNEXPLAINED_GAP`）；
+4. 金额差额可归因：声明 − 实收 = 0，或全部由不可读/缺失行承载（`R_UNEXPLAINED_AMOUNT`）。
+
+**发布纪律**：
+
+- 无法解释的少行（残差 ≠ 0）不能发布：日表接口只发「当前发布版」——最新一个结论为
+  可发布的完成批次；
+- 重跑同一批命中批次键，直接复用落库的同一份结论，不重复计数；
+- 新批次失败或不可发布时，上一版结果与证据（快照、清单、日表）原样保留，发布指针不动；
+- 结论对象（`publish`）随批次落库一份，页面 `/recon`、`GET /api/recon`、
+  `GET /api/export/daily.json` 与 `manifest.json` 读的都是它。

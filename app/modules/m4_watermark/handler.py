@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request
 from ... import config
 from ...web import Ctx, get_ctx, render
 from ..m6_batches import history as history_mod
+from ..m8_recon import service as m8_service
 from . import service
 
 router = APIRouter(tags=["M4 水位与迟到"])
@@ -53,6 +54,9 @@ def page_home(request: Request, batch_id: str | None = None,
                   if batch else [],
                   window_rows=service.window_rows(),
                   reconcile=reconcile,
+                  publish=(m8_service.conclusion_for(ctx.store, batch["batch_id"])
+                           if batch else None),
+                  published=m8_service.published_pointer(ctx.store),
                   batch_list=history_mod.rows(ctx.store, limit=6),
                   late_window=ctx.settings.late_window_minutes,
                   page_title="水位时间轴")

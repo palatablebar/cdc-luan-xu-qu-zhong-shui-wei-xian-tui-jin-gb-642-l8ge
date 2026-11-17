@@ -25,6 +25,7 @@ NAV = (
     ("/schema", "契约", "schema"),
     ("/conflicts", "冲突隔离", "conflicts"),
     ("/snapshot", "快照", "snapshot"),
+    ("/recon", "对账发布", "recon"),
     ("/batches", "批次", "batches"),
 )
 
@@ -113,7 +114,7 @@ DEFAULT_TOTALS = {
     "tombstone_keys": 0, "pending_only_keys": 0, "pending_events": 0,
     "drift_keys": 0, "amount_snapshot": "0.00", "amount_pending": "0.00",
     "amount_drift": "0.00", "amount_applied": "0.00",
-    "reconcile_ok": "0",
+    "reconcile_ok": "0", "publish_ok": "0",
 }
 
 

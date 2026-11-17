@@ -202,6 +202,26 @@ table.grid tr.is-dim td {
   color: var(--ink-muted);
 }
 
+table.grid tr.is-total td {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.kv-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11.8px;
+}
+
+.kv-list li {
+  padding: 1px 0;
+}
+
+td .is-warn,
+span.is-warn {
+  color: var(--warn);
+}
+
 .num {
   text-align: right;
   font-family: var(--font-num);

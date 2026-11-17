@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="panel">
+  <div class="panel-head">
+    <h1>发布结论</h1>
+    <p class="panel-sub">{{ publish.baseline_note }}</p>
+  </div>
+  <div class="panel-body">
+    <p>
+      <span class="balance {% if not publish.publishable %}is-bad{% endif %}">
+        {{ "可发布" if publish.publishable else "不可发布" }}</span>
+      <code class="code is-{{ publish.code | level }}">{{ publish.code }}</code>
+    </p>
+    <p class="hint" style="margin-top:8px">{{ publish.verdict }}</p>
+    <div class="actions" style="margin-top:10px">
+      <a class="btn btn-primary" href="/api/export/daily.json">下载正式日表</a>
+      <a class="btn" href="/api/recon">结论 JSON</a>
+      <a class="btn btn-ghost" href="/api/export/manifest.json">运行清单</a>
+    </div>
+    {% if published %}
+    <p class="hint">当前发布版：<span class="mono">{{ published.batch_id }}</span>
+      · 水位 {{ published.watermark_utc | localdt }}
+      {% if batch and published.batch_id != batch.batch_id %}
+      · 本批 {{ batch.batch_id }} 未发布，日表仍为上一版{% endif %}</p>
+    {% else %}
+    <p class="hint">还没有可发布的批次。</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>发布门槛</h2>
+    <p class="panel-sub">任一不过即不可发布</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid">
+        <thead><tr><th>门槛</th><th>结论</th><th>说明</th></tr></thead>
+        <tbody>
+          {% for gate in publish.gates %}
+          <tr>
+            <td>{{ gate.label }}</td>
+            <td><span class="balance {% if not gate.ok %}is-bad{% endif %}">{{ "过" if gate.ok else "不过" }}</span></td>
+            <td>{{ gate.detail }}</td>
+          </tr>
+          {% endfor %}
+          {% if not publish.gates %}<tr><td colspan="3" class="empty">还没有门槛结果。</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="split-even">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>行差额桥</h2>
+      <p class="panel-sub">声明 → 快照，逐步归因</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>环节</th><th class="num">行数</th><th>归因</th></tr></thead>
+          <tbody>
+            {% for step in publish.row_bridge %}
+            <tr class="{% if step.kind == 'total' %}is-total{% endif %}">
+              <td>{{ step.label }}</td>
+              <td class="num">{{ step.value if step.value is not none else "—" }}</td>
+              <td class="is-dim">{{ step.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>金额差额桥</h2>
+      <p class="panel-sub">单位：{{ money_unit }}</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>环节</th><th class="num">金额</th><th>归因</th></tr></thead>
+          <tbody>
+            {% for step in publish.amount_bridge %}
+            <tr class="{% if step.kind == 'total' %}is-total{% endif %}">
+              <td>{{ step.label }}</td>
+              <td class="num">{{ step.value if step.value is not none else "—" }}</td>
+              <td class="is-dim">{{ step.note }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>分表对账</h2>
+    <p class="panel-sub">文件头 tables= 声明 vs 实收</p>
+  </div>
+  <div class="panel-body tight">
+    <div class="table-wrap">
+      <table class="grid" data-sortable>
+        <thead>
+          <tr><th>表</th><th class="num">声明行</th><th class="num">实收行</th><th class="num">行差</th><th class="num">声明金额</th><th class="num">实收金额</th><th class="num">金额差</th></tr>
+        </thead>
+        <tbody>
+          {% for row in publish.per_table %}
+          <tr>
+            <td>{{ row.table }}</td>
+            <td class="num">{{ row.declared_rows if row.declared_rows is not none else "—" }}</td>
+            <td class="num">{{ row.received_rows | num }}</td>
+            <td class="num"><span class="{% if row.gap_rows %}is-warn{% endif %}">{{ row.gap_rows if row.gap_rows is not none else "—" }}</span></td>
+            <td class="num">{{ row.declared_amount if row.declared_amount is not none else "—" }}</td>
+            <td class="num">{{ row.received_amount | dec }}</td>
+            <td class="num"><span class="{% if row.gap_amount not in (none, '0.00') %}is-warn{% endif %}">{{ row.gap_amount if row.gap_amount is not none else "—" }}</span></td>
+          </tr>
+          {% endfor %}
+          {% if not publish.per_table %}<tr><td colspan="7" class="empty">没有分表声明。</td></tr>{% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="split-even">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>金额载体</h2>
+      <p class="panel-sub">声明与实收的差额由这些行承载</p>
+    </div>
+    <div class="panel-body">
+      {% if publish.carriers %}
+      <ul class="kv-list">
+        {% for ref in publish.carriers %}<li class="mono">{{ ref }}</li>{% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty">没有不可读 / 缺失行。</p>
+      {% endif %}
+      {% if publish.unattributed_amount not in (none, '0.00') %}
+      <p class="hint">未归因金额合计 {{ publish.unattributed_amount }} 元。</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>源端声明</h2>
+      <p class="panel-sub">{{ publish.inputs | length }} 个文件</p>
+    </div>
+    <div class="panel-body tight">
+      <div class="table-wrap">
+        <table class="grid">
+          <thead><tr><th>文件</th><th class="num">声明行</th><th class="num">实收行</th><th class="num">声明金额</th><th>截断</th></tr></thead>
+          <tbody>
+            {% for item in publish.inputs %}
+            <tr>
+              <td class="mono">{{ item.name }}</td>
+              <td class="num">{{ item.declared_rows if item.declared_rows is not none else "—" }}</td>
+              <td class="num">{{ item.lines | num }}</td>
+              <td class="num">{{ item.declared_amount if item.declared_amount is not none else "—" }}</td>
+              <td>{{ "是" if item.truncated else "否" }}</td>
+            </tr>
+            {% endfor %}
+            {% if not publish.inputs %}<tr><td colspan="5" class="empty">还没有输入文件。</td></tr>{% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

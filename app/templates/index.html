@@ -106,6 +106,14 @@
             </tbody>
           </table>
         </div>
+        {% if publish %}
+        <p class="hint" style="margin-top:8px">
+          发布结论：<span class="balance {% if not publish.publishable %}is-bad{% endif %}">{{ "可发布" if publish.publishable else "不可发布" }}</span>
+          <a href="/recon">{{ publish.verdict }}</a>
+          {% if published and batch and published.batch_id != batch.batch_id %}
+          · 当前发布版仍为 <span class="mono">{{ published.batch_id }}</span>{% endif %}
+        </p>
+        {% endif %}
       </div>
     </section>
 
